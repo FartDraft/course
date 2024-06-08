@@ -94,6 +94,7 @@ static const char* const eh_status_name[] = {"EH_INSERT",    "EH_UPDATE", "EH_OV
                                                                                                                        \
         table._dirs._links[0] = eh_malloc_or_die_(sizeof(**table._dirs._links));                                       \
         table._dirs._links[1] = eh_malloc_or_die_(sizeof(**table._dirs._links));                                       \
+                                                                                                                       \
         *table._dirs._links[0] = (eh_bucket_##key_t##_##value_t##_t_){                                                 \
             ._local_depth = 1,                                                                                         \
             ._items = eh_calloc_or_die_(table._bucket_capacity, sizeof(table._null_item)),                             \
@@ -109,7 +110,6 @@ static const char* const eh_status_name[] = {"EH_INSERT",    "EH_UPDATE", "EH_OV
     }                                                                                                                  \
                                                                                                                        \
     void eh_destroy_##key_t##_##value_t(extendible_hashtable_##key_t##_##value_t##_t* table) {                         \
-                                                                                                                       \
         for (eh_bucket_##key_t##_##value_t##_t_ * tmp, *head = *table->_dirs._links; head != NULL;) {                  \
             tmp = head;                                                                                                \
             head = head->_next;                                                                                        \
@@ -127,7 +127,9 @@ static const char* const eh_status_name[] = {"EH_INSERT",    "EH_UPDATE", "EH_OV
                                                                                                                        \
         eh_bucket_##key_t##_##value_t##_t_* bucket =                                                                   \
             table->_dirs._links[table->hash(key) & ((1 << table->_dirs._global_depth) - 1)];                           \
+                                                                                                                       \
         size_t i = 0;                                                                                                  \
+        /*BUG: tombstone need to be ignored.*/                                                                         \
         while (memcmp(bucket->_items + i, &table->_null_item, sizeof(table->_null_item)) != 0                          \
                && memcmp(bucket->_items + i, &table->_tombstone_item, sizeof(table->_null_item)) != 0) {               \
             if (table->cmp(&bucket->_items[i]._key, key) == 0) {                                                       \
@@ -172,7 +174,10 @@ static const char* const eh_status_name[] = {"EH_INSERT",    "EH_UPDATE", "EH_OV
         ++bucket->_local_depth;                                                                                        \
         for (size_t i = 0, j = table->_bucket_capacity - 1; i < j; ++i) {                                              \
             if (memcmp(bucket->_items + i, &table->_null_item, sizeof(table->_null_item)) == 0) {                      \
-                for (; i < j && memcmp(bucket->_items + j, &table->_null_item, sizeof(table->_null_item)) == 0; --j) { \
+                for (; memcmp(bucket->_items + j, &table->_null_item, sizeof(table->_null_item)) == 0; --j) {          \
+                    if (i < j) {                                                                                       \
+                        break;                                                                                         \
+                    }                                                                                                  \
                 }                                                                                                      \
                 bucket->_items[i] = bucket->_items[j];                                                                 \
                 bucket->_items[j] = table->_null_item;                                                                 \
@@ -196,48 +201,13 @@ static const char* const eh_status_name[] = {"EH_INSERT",    "EH_UPDATE", "EH_OV
         eh_bucket_##key_t##_##value_t##_t_* bucket =                                                                   \
             table->_dirs._links[table->hash(key) & ((1 << table->_dirs._global_depth) - 1)];                           \
         size_t i = 0;                                                                                                  \
-        while (memcmp(bucket->_items + i, &table->_null_item, sizeof(table->_null_item)) != 0                          \
-               && memcmp(bucket->_items + i, &table->_tombstone_item, sizeof(table->_null_item)) != 0) {               \
+        while (memcmp(bucket->_items + i, &table->_null_item, sizeof(table->_null_item)) != 0) {                       \
             if (table->cmp(&bucket->_items[i]._key, key) == 0) {                                                       \
                 return &bucket->_items[i].value;                                                                       \
             }                                                                                                          \
             ++i;                                                                                                       \
         }                                                                                                              \
         return NULL;                                                                                                   \
-    }                                                                                                                  \
-                                                                                                                       \
-    typedef struct {                                                                                                   \
-        const extendible_hashtable_##key_t##_##value_t##_t* _table;                                                    \
-        eh_bucket_##key_t##_##value_t##_t_* _bucket;                                                                   \
-        size_t _index;                                                                                                 \
-    } extendible_hashtable_it_##key_t##_##value_t##_t;                                                                 \
-                                                                                                                       \
-    [[nodiscard]] extendible_hashtable_it_##key_t##_##value_t##_t eh_make_it_##key_t##_##value_t(                      \
-        const extendible_hashtable_##key_t##_##value_t##_t* table) {                                                   \
-        return (extendible_hashtable_it_##key_t##_##value_t##_t){                                                      \
-            ._table = table, ._bucket = *table->_dirs._links, ._index = 0};                                            \
-    }                                                                                                                  \
-                                                                                                                       \
-/*enum eh_status_t eh_next_##key_t##_##value_t(const extendible_hashtable_it_##key_t##_##value_t##_t* it_table,      \*/
-/*                                             key_t* key, value_t* value) {                                         \*/
-/*    for (eh_bucket_##key_t##_##value_t##_t_* head = it_table->_bucket; head != NULL; head = head->_next) {         \*/
-/*        for (size_t i = it_table->_index;                                                                          \*/
-/*             i < it_table->_table->_bucket_capacity                                                                \*/
-/*             && memcmp(it_table->_bucket->_items + i, &it_table->_table->_null_item,                               \*/
-/*                       sizeof(it_table->_table->_null_item))                                                       \*/
-/*                    != 0                                                                                           \*/
-/*             && memcmp(it_table->_bucket->_items + i, &it_table->_table->_tombstone_item,                          \*/
-/*                       sizeof(it_table->_table->_null_item))                                                       \*/
-/*                    != 0;                                                                                          \*/
-/*             ++i) {                                                                                                \*/
-/*            memcpy(value, &it_table->_bucket->_items[i].value, sizeof(value_t));                                   \*/
-/*            memcpy(key, &it_table->_bucket->_items[i]._key, sizeof(key_t));                                        \*/
-/*            return EH_FOUND;                                                                                       \*/
-/*        }                                                                                                          \*/
-/*        it_table->_index = 0;                                                                                      \*/
-/*    }                                                                                                              \*/
-/*    return EH_NOT_FOUND;                                                                                           \*/
-/*}*/
+    }
 
-// Skip tombstone, stop null.
 #endif
